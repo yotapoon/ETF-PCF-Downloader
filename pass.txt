@@ -1,4 +1,0 @@
-chcp 65001
-
-call C:\Users\yota-\.\venv\Scripts\activate.bat
-call activate venv
