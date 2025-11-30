@@ -31,17 +31,21 @@
 
 ```
 .
-├── .env                   # 環境変数ファイル (Git管理外)
+├── .env
 ├── .gitignore
-├── config.py              # 設定ファイル
-├── create_table.sql       # データベースのテーブル作成用SQL
-├── download_log.csv       # データダウンロードの実行ログ
-├── download_pcfs.bat      # ダウンロードスクリプトの実行用バッチファイル
-├── download_pcfs.py       # データダウンロード用Pythonスクリプト
-└── downloads/             # ダウンロードしたzipファイルの保存先
-    ├── ice/
-    ├── ihs/
-    └── solactive/
+├── config.py
+├── create_table.sql
+├── download_log.csv
+├── README.md
+├── data/
+│   └── downloads/
+│       ├── ice/
+│       ├── ihs/
+│       └── solactive/
+└── scripts/
+    ├── download_pcfs.bat
+    ├── download_pcfs.py
+    └── parse_pcfs.py
 ```
 
 ## 使い方
@@ -56,16 +60,16 @@
     ```
 
 3.  **実行**
-    `download_pcfs.bat` を実行します。
+    プロジェクトのルートディレクトリから、以下のコマンドでバッチファイルを実行します。
     ```bash
-    ./download_pcfs.bat
+    scripts\download_pcfs.bat
     ```
-    これにより `download_pcfs.py` が実行され、`downloads` ディレクトリにデータが保存されます。
+    これにより `scripts/download_pcfs.py` が実行され、`data/downloads` ディレクトリにデータが保存されます。
 
 4.  **データベースの準備**
     `create_table.sql` を使用して、任意のSQLデータベースにテーブルを作成します。
 
 ## 次のステップ
 
-- `downloads` ディリトリ内のzipファイルを解凍する機能の実装。
+- `data/downloads` ディレクトリ内のzipファイルを解凍する機能の実装。
 - 解凍したデータを解析し、データベースに登録する処理の実装。

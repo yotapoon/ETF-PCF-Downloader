@@ -6,8 +6,13 @@ from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 
 # 設定
-LOG_CSV = "download_log.csv"
-BASE_DIR = "downloads"
+# このスクリプトがどこから実行されても正しくパスを解決するための設定
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(script_dir)
+
+LOG_CSV = os.path.join(project_root, 'download_log.csv')
+BASE_DIR = os.path.join(project_root, 'data', 'downloads')
+
 for src in ['ice', 'ihs', 'solactive']:
     os.makedirs(os.path.join(BASE_DIR, src), exist_ok=True)
 

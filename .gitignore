@@ -5,6 +5,6 @@ __pycache__/
 *.pyc
 
 # スクリプトによってダウンロードされるデータはリポジトリに含めません
-downloads/
+data/downloads/
 .env
 
