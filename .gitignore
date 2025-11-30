@@ -1,0 +1,9 @@
+# .gitignore
+
+# Python artifacts
+__pycache__/
+*.pyc
+
+# スクリプトによってダウンロードされるデータはリポジトリに含めません
+downloads/
+
