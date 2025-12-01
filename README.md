@@ -23,9 +23,8 @@
 
 ## 主な機能
 
-- 複数のソースから日次のPCFデータをダウンロードします。
-- ログファイルを用いてダウンロード履歴を管理し、重複取得を防ぎます。
-- ダウンロードしたデータを格納するためのSQLデータベーススキーマを提供します。
+- **PCFファイルのダウンロード**: `scripts/download_pcfs.py` を実行することで、各指数提供会社から最新のPCF（Portfolio Composition File）のZIPファイルをダウンロードします。
+- **PCFファイルの解析**: `scripts/parse_pcfs.py` はダウンロードしたZIPファイルを解凍し、内部のCSVファイルを解析します。
 
 ## ディレクトリ構成
 
@@ -37,6 +36,7 @@
 ├── create_table.sql
 ├── download_log.csv
 ├── README.md
+├── check/
 ├── data/
 │   └── downloads/
 │       ├── ice/
@@ -54,22 +54,27 @@
     `.env` ファイルを作成し、ご自身の環境（データベースサーバー名など）に合わせて内容を編集します。詳細は「設定」セクションを参照してください。
 
 2.  **ライブラリのインストール**
-    必要なPythonライブラリをインストールします。`.env`ファイルを読み込むために `python-dotenv` が追加されています。
+    必要なPythonライブラリをインストールします。
     ```bash
-    pip install requests pandas python-dotenv
+    pip install -r requirements.txt
     ```
 
-3.  **実行**
-    プロジェクトのルートディレクトリから、以下のコマンドでバッチファイルを実行します。
+3.  **PCFファイルのダウンロード**
+    `scripts/download_pcfs.bat` を実行すると、`scripts/download_pcfs.py` が実行され、`data/downloads` ディレクトリにデータが保存されます。
     ```bash
     scripts\download_pcfs.bat
     ```
-    これにより `scripts/download_pcfs.py` が実行され、`data/downloads` ディレクトリにデータが保存されます。
 
-4.  **データベースの準備**
+4.  **ダウンロードしたファイルの解析**
+    `scripts/parse_pcfs.py` を実行して、ダウンロードしたZIPファイルを解凍し、内容をテスト解析します。
+    ```bash
+    python scripts/parse_pcfs.py
+    ```
+
+5.  **データベースの準備**
     `create_table.sql` を使用して、任意のSQLデータベースにテーブルを作成します。
 
 ## 次のステップ
 
-- `data/downloads` ディレクトリ内のzipファイルを解凍する機能の実装。
-- 解凍したデータを解析し、データベースに登録する処理の実装。
+- ダウンロードした全CSVファイルのデータ構造を網羅的に分析し、汎用的なパーサーを設計・実装する。
+- 解析したデータを整形し、データベースに登録する処理を実装する。

@@ -1,142 +1,129 @@
-import pandas as pd
 import os
+import glob
 import zipfile
-import csv
+import pandas as pd
+import shutil
+import logging
 
-def parse_ice_pcf(file_path: str):
+# ロギング設定: INFOレベル以上のメッセージをコンソールに出力
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+def analyze_csv_structure(csv_path):
     """
-    ICEからダウンロードした特殊な形式のPCF CSVファイルをパースする。
-    ファイルの区切り文字(カンマ or タブ)を自動検出する。
+    1つのCSVファイルの構造を解析し、ヘッダー情報をリストとして返します。
+    複数のエンコーディングを試行します。
 
     Args:
-        file_path (str): パース対象のCSVファイルへのパス。
+        csv_path (str): 解析対象のCSVファイルへのパス。
 
     Returns:
-        tuple: (fund_info_df, holdings_df)
-               - fund_info_df: ETFの基本情報を含むDataFrame (1行)。
-               - holdings_df: 保有銘柄の詳細情報を含むDataFrame。
-               エラー時は (None, None) を返す。
+        list: 抽出された構造情報のリスト。各要素は [path, filename, type, header] の形式。
     """
-    delimiter = ','  # デフォルトはカンマ
-    try:
-        # --- 区切り文字の自動検出 ---
-        with open(file_path, 'r', encoding='utf-8') as f:
-            # 信頼性が高いと思われる4行目(保有銘柄のヘッダー)を読み込んで判別
-            for _ in range(3):
-                f.readline()
-            sample_line = f.readline()
-            dialect = csv.Sniffer().sniff(sample_line, delimiters=',\t') # Comma and Tab
-            delimiter = dialect.delimiter
-    except Exception:
-        # 判別失敗時はデフォルトのカンマを使用
-        pass
+    structures = []
+    filename = os.path.basename(csv_path)
+    # 試行するエンコーディングのリスト
+    encodings_to_try = ['cp932', 'utf-8', 'shift_jis']
 
-    try:
-        # 1. ETF基本情報の読み込み
-        fund_info_df = pd.read_csv(file_path, header=0, nrows=1, sep=delimiter)
-        fund_info_df = fund_info_df.dropna(axis=1, how='all')
+    def read_headers(file_path, header_row, encoding_list):
+        """指定された行をヘッダーとして読み込み、カラム名を返す"""
+        for encoding in encoding_list:
+            try:
+                # nrows=0 を指定すると、データ部を読み込まずヘッダーのみを取得できる
+                df = pd.read_csv(file_path, header=header_row, nrows=0, encoding=encoding, on_bad_lines='skip')
+                return df.columns
+            except (UnicodeDecodeError, pd.errors.ParserError):
+                continue # エンコーディングが違う場合は次のものを試す
+            except Exception as e:
+                # その他の予期せぬエラー
+                logging.warning(f"Could not read header from {filename} with encoding {encoding} at row {header_row + 1}. Error: {e}")
+                return None
+        logging.warning(f"Failed to read header from {filename} at row {header_row + 1} with any of the specified encodings.")
+        return None
 
-        # 2. 保有銘柄一覧の読み込み
-        holdings_df = pd.read_csv(file_path, skiprows=3, sep=delimiter)
-        holdings_df = holdings_df.dropna(subset=['ISIN'])
+    # ETF基本情報のヘッダーを読み込む (2行目想定 -> header=1)
+    etf_info_headers = read_headers(csv_path, 1, encodings_to_try)
+    if etf_info_headers is not None:
+        for col in etf_info_headers:
+            col_str = str(col).strip()
+            # 空のカラムや 'Unnamed:' で始まる自動生成されたカラム名は除外
+            if col_str and 'Unnamed:' not in col_str:
+                structures.append([csv_path, filename, 'etf_info', col_str])
 
-        # 3. データの結合
-        fund_date = fund_info_df['Fund Date'].iloc[0]
-        etf_code = fund_info_df['ETF Code'].iloc[0]
+    # 保有銘柄一覧のヘッダーを読み込む (4行目想定 -> header=3)
+    holdings_headers = read_headers(csv_path, 3, encodings_to_try)
+    if holdings_headers is not None:
+        for col in holdings_headers:
+            col_str = str(col).strip()
+            if col_str and 'Unnamed:' not in col_str:
+                structures.append([csv_path, filename, 'holdings', col_str])
 
-        holdings_df['Fund Date'] = fund_date
-        holdings_df['ETF Code'] = etf_code
+    return structures
 
-        return fund_info_df, holdings_df
+def main():
+    """
+    メイン処理。
+    - data/downloads内の全zipファイルを処理対象とします。
+    - zipを解凍し、含まれる全CSVのヘッダー構造を解析します。
+    - 結果を`data/csv_structure.csv`に出力します。
+    - 処理後、解凍したファイル・ディレクトリは削除します。
+    """
+    logging.info("--- PCF Parser and Structure Analyzer ---")
 
-    except KeyError as e:
-        print(f"KeyError parsing file {file_path}: Column {e} not found.")
-        print(f"Used delimiter: '{delimiter}'. Please check file format.")
+    download_dir = 'data/downloads'
+    output_csv_path = 'data/csv_structure.csv'
+    all_structures = []
+
+    # data/downloads 以下のすべての.zipファイルを再帰的に検索
+    zip_files = glob.glob(os.path.join(download_dir, '**/*.zip'), recursive=True)
+    if not zip_files:
+        logging.info("No zip files found in '%s'.", download_dir)
+        return
+
+    logging.info(f"Found {len(zip_files)} zip files to process.")
+
+    for zip_path in zip_files:
+        # zipファイル名から拡張子を除いた名前を解凍先ディレクトリ名とする
+        extract_dir = zip_path.rsplit('.', 1)[0]
+        logging.info(f"Processing {zip_path}...")
+
         try:
-            # デバッグ用に読み込んだ列情報を表示
-            temp_df = pd.read_csv(file_path, skiprows=3, sep=delimiter, nrows=5)
-            print(f"Available columns: {temp_df.columns.tolist()}")
-        except Exception as debug_e:
-            print(f"Could not read columns for debugging: {debug_e}")
-        return None, None
-    except Exception as e:
-        print(f"An error occurred while parsing {file_path}: {e}")
-        return None, None
+            # zipファイルを解凍
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(extract_dir)
+            logging.info(f"Extracted to {extract_dir}")
 
-def unzip_pcf_archive(zip_file_path: str):
-    """
-    ZIPアーカイブを解凍し、中のCSVファイルへのパスのリストを返す。
+            # 解凍後のCSVファイルを再帰的に探索
+            csv_files = glob.glob(os.path.join(extract_dir, '**/*.csv'), recursive=True)
+            logging.info(f"Found {len(csv_files)} CSV files in extracted directory.")
 
-    Args:
-        zip_file_path (str): 解凍するZIPファイルへのパス。
+            # 各CSVの構造を解析
+            for csv_file in csv_files:
+                structures = analyze_csv_structure(csv_file)
+                if structures:
+                    all_structures.extend(structures)
+                else:
+                    logging.warning(f"Could not extract any header from {csv_file}")
 
-    Returns:
-        list: 抽出された全CSVファイルへのフルパスのリスト。
-    """
+        except Exception as e:
+            logging.error(f"Failed to process {zip_path}: {e}", exc_info=True)
+        finally:
+            # 処理後に解凍したディレクトリをクリーンアップ
+            if os.path.exists(extract_dir):
+                shutil.rmtree(extract_dir)
+                logging.info(f"Cleaned up directory: {extract_dir}")
+
+    if not all_structures:
+        logging.warning("No CSV header information could be extracted from any file.")
+        return
+
+    # 結果をDataFrameに変換してCSVに出力
     try:
-        # 解凍先のディレクトリ名をZIPファイル名から生成 (例: ice_20251128.zip -> ice_20251128/)
-        extract_dir = os.path.splitext(zip_file_path)[0]
-        
-        if not os.path.exists(extract_dir):
-            os.makedirs(extract_dir)
-            print(f"Created directory: {extract_dir}")
-
-        csv_files = []
-        with zipfile.ZipFile(zip_file_path, 'r') as zf:
-            print(f"Extracting {zip_file_path}...")
-            zf.extractall(extract_dir)
-            print("Extraction complete.")
-            
-            # 解凍されたファイルの中からCSVファイルを探す
-            for file_name in zf.namelist():
-                if file_name.lower().endswith('.csv'):
-                    csv_files.append(os.path.join(extract_dir, file_name))
-        
-        return csv_files
-
-    except FileNotFoundError:
-        print(f"[Error] ZIP file not found: {zip_file_path}")
-        return []
+        structure_df = pd.DataFrame(all_structures, columns=['path', 'filename', 'type', 'header'])
+        # Excelで文字化けしないように'utf-8-sig'を指定
+        structure_df.to_csv(output_csv_path, index=False, encoding='utf-8-sig')
+        logging.info(f"Analysis complete. Structure information saved to {output_csv_path}")
     except Exception as e:
-        print(f"An error occurred during unzipping: {e}")
-        return []
+        logging.error(f"Failed to save the output CSV file: {e}")
 
-# このスクリプトが直接実行された場合のテスト用コード
-if __name__ == '__main__':
-    print("--- PCF Parser and Unzip Script ---")
-    
-    # ----------------------------------------------------------------
-    # テスト対象のZIPファイルを指定
-    # 注: このテストコードは、プロジェクトのルートディレクトリから `python scripts/parse_pcfs.py` として実行することを想定しています。
-    sample_zip_file = os.path.join('data', 'downloads', 'ice', 'ice_20251128.zip')
-    # ----------------------------------------------------------------
-    
-    print(f"\nテスト対象ZIPファイル: {sample_zip_file}")
-
-    if not os.path.exists(sample_zip_file):
-        print(f"\n[Warning] テスト用のZIPファイルが見つかりません: {sample_zip_file}")
-        print("`data/downloads/ice/` に `ice_20251128.zip` が存在するか確認してください。")
-        print("処理をスキップします。")
-    else:
-        # 1. ZIPファイルを解凍し、CSVファイルのリストを取得
-        extracted_csv_files = unzip_pcf_archive(sample_zip_file)
-        
-        if extracted_csv_files:
-            print(f"\n発見されたCSVファイル: {len(extracted_csv_files)}個")
-            
-            # 2. 最初のCSVファイルだけをサンプルとしてパース処理
-            first_csv_path = extracted_csv_files[0]
-            print(f"--- 最初のCSVファイルをパースします: {first_csv_path} ---")
-            
-            fund_info, holdings_info = parse_ice_pcf(first_csv_path)
-
-            if fund_info is not None and holdings_info is not None:
-                print("\n--- 抽出されたETF基本情報 ---")
-                print(fund_info.to_string())
-                
-                print("\n--- 抽出された保有銘柄情報 (先頭5件) ---")
-                print(holdings_info.head().to_string())
-                
-                print("\nパース処理のテストが正常に完了しました。")
-        else:
-            print("\nZIPファイル内でCSVファイルが見つかりませんでした。")
+if __name__ == "__main__":
+    main()
