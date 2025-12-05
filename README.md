@@ -2,6 +2,7 @@
 
 ## 概要
 
+
 このプロジェクトは、複数の指数提供会社（ICE, IHS Markit, Solactive）からETF（上場投資信託）の構成銘柄データ（PCF）を日次で自動収集し、データベースに蓄積するためのシステムです。
 
 ## 設定
@@ -24,7 +25,7 @@
 ## 主な機能
 
 - **PCFファイルのダウンロード**: `scripts/download_pcfs.py` を実行することで、各指数提供会社から最新のPCF（Portfolio Composition File）のZIPファイルをダウンロードします。
-- **PCFファイルの解析**: `scripts/parse_pcfs.py` はダウンロードしたZIPファイルを解凍し、内部のCSVファイルを解析します。
+- **PCFファイルの解析**: `scripts/parse_pcfs_by_date.py` は、指定された日付のダウンロード済みZIPファイルを解凍し、含まれるCSVファイルを解析して、ETFの基本情報と保有銘柄情報を集約した2つのCSVファイルとして出力します。
 
 ## ディレクトリ構成
 
@@ -45,7 +46,7 @@
 └── scripts/
     ├── download_pcfs.bat
     ├── download_pcfs.py
-    └── parse_pcfs.py
+    └── parse_pcfs_by_date.py
 ```
 
 ## 使い方
@@ -66,9 +67,13 @@
     ```
 
 4.  **ダウンロードしたファイルの解析**
-    `scripts/parse_pcfs.py` を実行して、ダウンロードしたZIPファイルを解凍し、内容をテスト解析します。
+    `scripts/parse_pcfs_by_date.py` を日付を引数に指定して実行します。これにより、ダウンロードしたZIPファイルが解凍・解析され、`data` フォルダに集約されたCSVファイルが出力されます。
     ```bash
-    python scripts/parse_pcfs.py
+    python scripts/parse_pcfs_by_date.py YYYY-MM-DD
+    ```
+    例:
+    ```bash
+    python scripts/parse_pcfs_by_date.py 2025-12-04
     ```
 
 5.  **データベースの準備**
@@ -76,5 +81,6 @@
 
 ## 次のステップ
 
-- ダウンロードした全CSVファイルのデータ構造を網羅的に分析し、汎用的なパーサーを設計・実装する。
-- 解析したデータを整形し、データベースに登録する処理を実装する。
+- 出力された`base_info_(日付).csv`と`holdings_(日付).csv`の内容を確認し、最適なデータベースのテーブル構造を検討する。
+- 検討したDB構造に合うように、`parse_pcfs_by_date.py`のデータ整形処理を修正・拡張する。
+- 整形したデータをデータベースに登録する処理を実装する。
