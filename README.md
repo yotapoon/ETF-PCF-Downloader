@@ -1,86 +1,60 @@
-# ETF-PCF-Downloader
+# JPX ETF PCFデータ処理ツール
 
-## 概要
+JPX（日本取引所グループ）のウェブサイトからETFのPCF（ポートフォリオ構成ファイル）をダウンロードし、内容を解析してデータベースに登録するためのツールです。
 
-
-このプロジェクトは、複数の指数提供会社（ICE, IHS Markit, Solactive）からETF（上場投資信託）の構成銘柄データ（PCF）を日次で自動収集し、データベースに蓄積するためのシステムです。
-
-## 設定
-
-本プロジェクトの設定は `config.py` と `.env` ファイルによって管理されます。
-
-- **`config.py`**:
-  プロジェクト全体で利用される設定（ファイルパス、URLなど）が定義されています。
-
-- **`.env`**:
-  サーバー名やデータベース接続情報など、環境に依存する機密情報を記述するためのファイルです。このファイルは `.gitignore` により、Gitの管理対象から除外されています。
-  実行前に、このファイルを作成し、ご自身の環境に合わせて設定してください。
-
-  **.env ファイルの例:**
-  ```
-  DB_SERVER="your_server_name"
-  DB_NAME="ETF_PCFS"
-  ```
-
-## 主な機能
-
-- **PCFファイルのダウンロード**: `scripts/download_pcfs.py` を実行することで、各指数提供会社から最新のPCF（Portfolio Composition File）のZIPファイルをダウンロードします。
-- **PCFファイルの解析**: `scripts/parse_pcfs_by_date.py` は、指定された日付のダウンロード済みZIPファイルを解凍し、含まれるCSVファイルを解析して、ETFの基本情報と保有銘柄情報を集約した2つのCSVファイルとして出力します。
-
-## ディレクトリ構成
+## ファイル構成
 
 ```
 .
-├── .env
 ├── .gitignore
-├── config.py
-├── create_table.sql
-├── download_log.csv
-├── README.md
-├── check/
+├── config.py                # データベース接続情報などの設定ファイル
+├── create_table.sql         # データベースのテーブル定義
+├── download_log.csv         # データダウンロードの実行ログ
+├── README.md                # このファイル
+├── requirements.txt         # Pythonの依存パッケージリスト
 ├── data/
-│   └── downloads/
-│       ├── ice/
-│       ├── ihs/
-│       └── solactive/
+│   └── downloads/           # ダウンロードしたPCFのzipファイルを格納するディレクトリ
 └── scripts/
-    ├── download_pcfs.bat
-    ├── download_pcfs.py
-    └── parse_pcfs_by_date.py
+    ├── download_pcfs.bat      # データダウンロードスクリプトを実行するバッファイル
+    ├── download_pcfs.py       # JPXサイトからPCFデータをダウンロードするスクリプト
+    ├── import_daily_pcf.py  # 日付を指定してPCFデータを解析し、DBに登録するスクリプト
+    ├── pcf_parser.py          # 個別のPCFデータ（CSV）の解析処理を行うモジュール
+    └── database_handler.py    # データベースへの接続とデータ登録を行うモジュール
 ```
 
-## 使い方
+## 実行手順
 
-1.  **設定ファイルの準備**
-    `.env` ファイルを作成し、ご自身の環境（データベースサーバー名など）に合わせて内容を編集します。詳細は「設定」セクションを参照してください。
+### 1. 準備
 
-2.  **ライブラリのインストール**
-    必要なPythonライブラリをインストールします。
-    ```bash
+1.  `requirements.txt` をもとに、必要なPythonパッケージをインストールします。
+    ```shell
     pip install -r requirements.txt
     ```
+2.  `create_table.sql` を使用して、データベースにテーブルを作成します。
+3.  `config.py` を開き、ご自身の環境に合わせてデータベース接続情報などを設定します。
 
-3.  **PCFファイルのダウンロード**
-    `scripts/download_pcfs.bat` を実行すると、`scripts/download_pcfs.py` が実行され、`data/downloads` ディレクトリにデータが保存されます。
-    ```bash
-    scripts\download_pcfs.bat
-    ```
 
-4.  **ダウンロードしたファイルの解析**
-    `scripts/parse_pcfs_by_date.py` を日付を引数に指定して実行します。これにより、ダウンロードしたZIPファイルが解凍・解析され、`data` フォルダに集約されたCSVファイルが出力されます。
-    ```bash
-    python scripts/parse_pcfs_by_date.py YYYY-MM-DD
-    ```
-    例:
-    ```bash
-    python scripts/parse_pcfs_by_date.py 2025-12-04
-    ```
+### 2. PCFデータのダウンロード
 
-5.  **データベースの準備**
-    `create_table.sql` を使用して、任意のSQLデータベースにテーブルを作成します。
+`download_pcfs.bat` を実行すると、`scripts/download_pcfs.py` が起動し、PCFのzipファイルが `data/downloads/` ディレクトリにダウンロードされます。
 
-## 次のステップ
+```shell
+download_pcfs.bat
+```
 
-- 出力された`base_info_(日付).csv`と`holdings_(日付).csv`の内容を確認し、最適なデータベースのテーブル構造を検討する。
-- 検討したDB構造に合うように、`parse_pcfs_by_date.py`のデータ整形処理を修正・拡張する。
-- 整形したデータをデータベースに登録する処理を実装する。
+### 3. データの解析とデータベースへの登録
+
+`scripts/import_daily_pcf.py` を実行することで、ダウンロード済みのPCFデータが解析され、データベースに登録されます。
+`--date`引数で処理したい日付を `YYYY-MM-DD` 形式で指定できます。引数を省略した場合は、実行した当日の日付が自動的に使用されます。
+
+**例1：日付を指定して実行する場合（2023年1月1日）**
+```shell
+python scripts/import_daily_pcf.py --date 2023-01-01
+```
+
+**例2：当日のデータで実行する場合**
+```shell
+python scripts/import_daily_pcf.py
+```
+
+---

@@ -1,68 +1,99 @@
--- ƒf[ƒ^ƒx[ƒX‚ğw’è
+-- ãƒ‡ãƒ¼ã‚¿ãƒ™ãƒ¼ã‚¹ã‚’æŒ‡å®š
 USE [ETF_PCFS];
 GO
 
 ----------------------------------------------------
--- 1. MASTER ƒe[ƒuƒ‹‚Ìì¬
+-- 0. ãƒ†ãƒ¼ãƒ–ãƒ«ã®å‰Šé™¤ (å­˜åœ¨ã™ã‚‹å ´åˆ)
+-- ä¾å­˜é–¢ä¿‚ã‚’è€ƒæ…®ã—ã€å‚ç…§ã—ã¦ã„ã‚‹ãƒ†ãƒ¼ãƒ–ãƒ«ã‹ã‚‰å…ˆã«å‰Šé™¤ã™ã‚‹
 ----------------------------------------------------
-
--- ‡@ ƒtƒ@ƒ“ƒhƒ}ƒXƒ^ (MASTER_FUND)
-CREATE TABLE MASTER_FUND (
-    ETF_Code VARCHAR(20) NOT NULL,
-    ETF_Name NVARCHAR(200) NOT NULL, 
-    
-    CONSTRAINT PK_MASTER_FUND PRIMARY KEY (ETF_Code)
-);
+IF OBJECT_ID('dbo.holding_detail', 'U') IS NOT NULL
+    DROP TABLE dbo.holding_detail;
 GO
-
--- ‡A –Á•¿ƒ}ƒXƒ^ (MASTER_STOCK)
-CREATE TABLE MASTER_STOCK (
-    ISIN VARCHAR(12) NOT NULL,
-    Local_Code VARCHAR(20) NULL,
-    Stock_Name NVARCHAR(200) NOT NULL, 
-    Exchange VARCHAR(50) NULL,      
-    Currency VARCHAR(10) NULL,      
-    
-    CONSTRAINT PK_MASTER_STOCK PRIMARY KEY (ISIN)
-);
+IF OBJECT_ID('dbo.history_fund_daily', 'U') IS NOT NULL
+    DROP TABLE dbo.history_fund_daily;
+GO
+IF OBJECT_ID('dbo.master_fund', 'U') IS NOT NULL
+    DROP TABLE dbo.master_fund;
+GO
+IF OBJECT_ID('dbo.master_stock', 'U') IS NOT NULL
+    DROP TABLE dbo.master_stock;
 GO
 
 ----------------------------------------------------
--- 2. TRANSACTION/HISTORY ƒe[ƒuƒ‹‚Ìì¬
+-- 1. MASTER ãƒ†ãƒ¼ãƒ–ãƒ«ã®ä½œæˆ
 ----------------------------------------------------
 
--- ‡B ƒtƒ@ƒ“ƒh“úŸ—š—ğƒe[ƒuƒ‹ (HISTORY_FUND_DAILY)
-CREATE TABLE HISTORY_FUND_DAILY (
-    Fund_Date DATE NOT NULL,
-    ETF_Code VARCHAR(20) NOT NULL,
-    Cash_Component DECIMAL(18,2) NULL, 
-    Shares_Outstanding DECIMAL(18,2) NULL, 
-    
-    CONSTRAINT PK_HISTORY_FUND_DAILY PRIMARY KEY (Fund_Date, ETF_Code),
-    
-    -- ŠO•”ƒL[: MASTER_FUND‚ğQÆ
-    CONSTRAINT FK_Daily_MASTER_FUND FOREIGN KEY (ETF_Code) 
-        REFERENCES MASTER_FUND(ETF_Code)
+-- â‘  ãƒ•ã‚¡ãƒ³ãƒ‰ãƒã‚¹ã‚¿ (master_fund)
+CREATE TABLE master_fund (
+    etf_code VARCHAR(4) NOT NULL,
+    etf_name NVARCHAR(200) NOT NULL,
+
+    CONSTRAINT pk_master_fund PRIMARY KEY (etf_code)
 );
 GO
 
--- ‡C PCF•Û—L–¾×ƒe[ƒuƒ‹ (HOLDING_DETAIL)
-CREATE TABLE HOLDING_DETAIL (
-    Fund_Date DATE NOT NULL,
-    ETF_Code VARCHAR(20) NOT NULL,
-    ISIN VARCHAR(12) NOT NULL,
-    Shares_Amount DECIMAL(18,4) NULL,
-    Stock_Price DECIMAL(18,4) NULL,
-    
-    CONSTRAINT PK_HOLDING_DETAIL PRIMARY KEY (Fund_Date, ETF_Code, ISIN),
-    
-    -- ŠO•”ƒL[1: HISTORY_FUND_DAILY‚ğQÆ
-    CONSTRAINT FK_Holding_Daily FOREIGN KEY (Fund_Date, ETF_Code) 
-        REFERENCES HISTORY_FUND_DAILY(Fund_Date, ETF_Code),
-        
-    -- ŠO•”ƒL[2: MASTER_STOCK‚ğQÆ
-    CONSTRAINT FK_Holding_Stock FOREIGN KEY (ISIN) 
-        REFERENCES MASTER_STOCK(ISIN)
+-- â‘¡ éŠ˜æŸ„ãƒã‚¹ã‚¿ (master_stock)
+CREATE TABLE master_stock (
+    stock_id INT IDENTITY(1,1) NOT NULL,
+    isin VARCHAR(12) NULL,
+    local_code VARCHAR(20) NULL,
+    stock_name NVARCHAR(200) NULL,
+    exchange VARCHAR(50) NULL,
+    currency VARCHAR(10) NULL,
+
+    CONSTRAINT pk_master_stock PRIMARY KEY (stock_id)
 );
 GO
 
+-- isinãŒNULLã§ãªã„å ´åˆã«ä¸€æ„æ€§ã‚’ä¿è¨¼ã™ã‚‹Filtered Indexã‚’ä½œæˆ
+CREATE UNIQUE INDEX uq_master_stock_isin_notnull
+ON master_stock(isin)
+WHERE isin IS NOT NULL;
+GO
+
+----------------------------------------------------
+-- 2. TRANSACTION/HISTORY ãƒ†ãƒ¼ãƒ–ãƒ«ã®ä½œæˆ
+----------------------------------------------------
+
+-- â‘¢ æ—¥æ¬¡ãƒ•ã‚¡ãƒ³ãƒ‰æƒ…å ±ãƒ†ãƒ¼ãƒ–ãƒ« (history_fund_daily)
+CREATE TABLE history_fund_daily (
+    fund_date DATE NOT NULL,
+    etf_code VARCHAR(4) NOT NULL,
+    cash_component DECIMAL(18,2) NULL,
+    shares_outstanding DECIMAL(18,2) NULL,
+	cash_and_others DECIMAL(18,2) NULL,
+	aum DECIMAL(18,2) NULL,
+    source VARCHAR(20) NULL,
+
+    CONSTRAINT pk_history_fund_daily PRIMARY KEY (fund_date, etf_code),
+
+    -- å¤–éƒ¨ã‚­ãƒ¼: master_fundã‚’å‚ç…§
+    CONSTRAINT fk_daily_master_fund FOREIGN KEY (etf_code)
+        REFERENCES master_fund(etf_code)
+);
+GO
+
+-- â‘£ PCFæ§‹æˆéŠ˜æŸ„ãƒ†ãƒ¼ãƒ–ãƒ« (holding_detail)
+CREATE TABLE holding_detail (
+    fund_date DATE NOT NULL,
+    etf_code VARCHAR(4) NOT NULL,
+    stock_id INT NOT NULL,
+    shares_amount DECIMAL(18,4) NULL,
+    stock_price DECIMAL(18,4) NULL,
+    market_value DECIMAL(18, 4) NULL,
+    fx_rate DECIMAL(18, 8) NULL,
+    fx_forward_delivery_date DATE NULL,
+    future_multiplier DECIMAL(18, 4) NULL,
+    source VARCHAR(20) NULL,
+
+    CONSTRAINT pk_holding_detail PRIMARY KEY (fund_date, etf_code, stock_id),
+
+    -- å¤–éƒ¨ã‚­ãƒ¼1: history_fund_dailyã‚’å‚ç…§
+    CONSTRAINT fk_holding_daily FOREIGN KEY (fund_date, etf_code)
+        REFERENCES history_fund_daily(fund_date, etf_code),
+
+    -- å¤–éƒ¨ã‚­ãƒ¼2: master_stockã‚’å‚ç…§
+    CONSTRAINT fk_holding_stock FOREIGN KEY (stock_id)
+        REFERENCES master_stock(stock_id)
+);
+GO
