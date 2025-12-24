@@ -1,7 +1,9 @@
 import pandas as pd
 import logging
+from pandas.io import sql as pd_sql
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.types import NVARCHAR
 import sys
 import os
 
@@ -21,7 +23,7 @@ def get_db_engine():
     if engine is None:
         try:
             logging.info("Initializing database engine.")
-            engine = create_engine(config.CONNECTION_STRING)
+            engine = create_engine(config.CONNECTION_STRING, fast_executemany=True)
             # 接続テスト
             with engine.connect() as connection:
                 logging.info("Database connection successful.")
@@ -72,22 +74,15 @@ def _save_fund_data(connection, df: pd.DataFrame):
         _upsert(connection, 'master_fund', fund_master_df, ['etf_code'])
 
     # 2. history_fund_daily のINSERT
-    # history_fund_dailyテーブルに必要なカラムを定義
     history_cols = ['fund_date', 'etf_code', 'cash_component', 'shares_outstanding', 'cash_and_others', 'aum', 'source']
-    
-    # dfに存在するカラムのみでDataFrameを再構築
     existing_cols = [col for col in history_cols if col in df.columns]
     fund_history_df = df[existing_cols].copy()
 
-    # 存在しないカラムをNone(NULL)で追加
     for col in history_cols:
         if col not in fund_history_df.columns:
             fund_history_df[col] = None
     
-    # to_sqlに渡す前に、カラムの順序を揃えておく
     fund_history_df = fund_history_df[history_cols]
-
-    # 重複を除いてから挿入
     fund_history_df.drop_duplicates(inplace=True)
     
     if not fund_history_df.empty:
@@ -109,17 +104,13 @@ def _save_holdings_data(connection, df: pd.DataFrame, date: str):
 
     # 1. master_stockに登録するための元データ準備
     master_stock_cols = ['isin', 'local_code', 'name', 'exchange', 'currency']
-    # 存在するカラムのみでDataFrameを再構築
     existing_cols = [col for col in master_stock_cols if col in df.columns]
     stock_master_df = df[existing_cols].copy()
-    # 存在しないカラムをNone(NULL)で追加
     for col in master_stock_cols:
         if col not in stock_master_df.columns:
             stock_master_df[col] = None
-    # カラム名をDBスキーマに合わせる
     stock_master_df = stock_master_df.rename(columns={'name': 'stock_name'})
 
-    # 銘柄を一意に識別するためのキーで重複を除外
     stock_master_df.drop_duplicates(subset=['isin'], inplace=True, ignore_index=True)
     stock_master_df.drop_duplicates(subset=['local_code', 'exchange'], inplace=True, ignore_index=True)
 
@@ -130,7 +121,6 @@ def _save_holdings_data(connection, df: pd.DataFrame, date: str):
     if not df_with_isin.empty:
         _upsert(connection, 'master_stock', df_with_isin, ['isin'])
     if not df_without_isin.empty:
-        # local_codeとexchangeがない銘柄は登録できない
         df_without_isin.dropna(subset=['local_code', 'exchange'], inplace=True)
         if not df_without_isin.empty:
             _upsert(connection, 'master_stock', df_without_isin, ['local_code', 'exchange'])
@@ -142,7 +132,7 @@ def _save_holdings_data(connection, df: pd.DataFrame, date: str):
     if all_isins:
         isins_df = pd.DataFrame(all_isins, columns=['isin'])
         temp_isin_table = '#temp_isin_list'
-        isins_df.to_sql(temp_isin_table, connection, if_exists='replace', index=False)
+        _safe_to_temp_sql(isins_df, temp_isin_table, connection)
         query_isin = text(f"""
             SELECT T1.stock_id, T1.isin FROM master_stock AS T1
             INNER JOIN {temp_isin_table} AS T2 ON T1.isin = T2.isin
@@ -155,7 +145,7 @@ def _save_holdings_data(connection, df: pd.DataFrame, date: str):
     if not df_for_local_code_lookup.empty:
         local_codes_df = df_for_local_code_lookup[['local_code', 'exchange']].drop_duplicates()
         temp_local_code_table = '#temp_local_code_list'
-        local_codes_df.to_sql(temp_local_code_table, connection, if_exists='replace', index=False)
+        _safe_to_temp_sql(local_codes_df, temp_local_code_table, connection)
         query_local_code = text(f"""
             SELECT T1.stock_id, T1.local_code, T1.exchange FROM master_stock AS T1
             INNER JOIN {temp_local_code_table} AS T2 ON T1.local_code = T2.local_code AND T1.exchange = T2.exchange
@@ -196,11 +186,9 @@ def _save_holdings_data(connection, df: pd.DataFrame, date: str):
     # 6. holding_detail のINSERT
     cols = ['fund_date', 'etf_code', 'stock_id', 'shares_amount', 'stock_price', 'market_value', 'fx_rate', 'fx_forward_delivery_date', 'future_multiplier', 'source']
     
-    # 存在するカラムのみを抽出
     final_cols = [c for c in cols if c in holding_detail_df.columns]
-    final_holding_df = holding_detail_df[final_cols]
+    final_holding_df = holding_detail_df[final_cols].copy()
     
-    # 重複を削除
     final_holding_df.drop_duplicates(inplace=True)
 
     if not final_holding_df.empty:
@@ -210,6 +198,20 @@ def _save_holdings_data(connection, df: pd.DataFrame, date: str):
         except IntegrityError:
             logging.warning("Some holding detail data might already exist. Skipping duplicates.")
 
+def _safe_to_temp_sql(df: pd.DataFrame, table_name: str, connection, dtype_map: dict = None):
+    """
+    DataFrameをSQL Serverの一時テーブルに安全に書き込むヘルパー関数。
+    pandas.to_sqlのif_exists='replace'が引き起こすリフレクションエラーを回避する。
+    """
+    if not table_name.startswith('#'):
+        raise ValueError("Temporary table name must start with '#'")
+
+    # `tempdb`でオブジェクトIDを確認するのは、一時テーブルを扱う際の堅牢な方法
+    connection.execute(text(f"IF OBJECT_ID('tempdb..{table_name}') IS NOT NULL DROP TABLE {table_name}"))
+
+    # DataFrameを一時テーブルにロード（if_existsはデフォルトの'fail'のまま）
+    df.to_sql(table_name, connection, index=False, dtype=dtype_map)
+
 def _upsert(connection, table_name, df, key_cols):
     """
     MERGE文を使ってDataFrameのデータをテーブルにUPSERTする汎用関数
@@ -218,13 +220,16 @@ def _upsert(connection, table_name, df, key_cols):
         return
 
     temp_table_name = f"#{table_name}_temp"
-    
-    # DataFrameを一時テーブルにロード
-    df.to_sql(temp_table_name, connection, if_exists='replace', index=False)
 
+    # DataFrameの文字列型カラムの型を明示的に指定
+    dtype_map = {}
+    for col in df.columns:
+        if df[col].dtype == 'object' and df[col].notna().any():
+            max_len = int(df[col].str.len().max())
+            dtype_map[col] = NVARCHAR(max_len if max_len > 0 else 1)
+
+    # MERGE文を先に構築
     update_cols = [col for col in df.columns if col not in key_cols]
-    
-    # MERGE文の構築
     merge_sql = f"""
     MERGE {table_name} AS target
     USING {temp_table_name} AS source
@@ -235,13 +240,15 @@ def _upsert(connection, table_name, df, key_cols):
         INSERT ({', '.join(df.columns)})
         VALUES ({', '.join([f'source.{col}' for col in df.columns])});
     """
-    
+
     try:
+        # 新しいヘルパー関数で安全に一時テーブルへ書き込む
+        _safe_to_temp_sql(df, temp_table_name, connection, dtype_map=dtype_map)
+
+        # MERGE実行
         connection.execute(text(merge_sql))
         logging.info(f"Upserted {len(df)} rows into {table_name}.")
+
     except Exception as e:
         logging.error(f"Error during upsert to {table_name}: {e}")
         raise
-    finally:
-        # 一時テーブルはセッション終了時に自動的に削除される
-        pass

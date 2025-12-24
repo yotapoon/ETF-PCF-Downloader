@@ -7,19 +7,21 @@ JPX（日本取引所グループ）のウェブサイトからETFのPCF（ポ�
 ```
 .
 ├── .gitignore
-├── config.py                # データベース接続情報などの設定ファイル
-├── create_table.sql         # データベースのテーブル定義
-├── download_log.csv         # データダウンロードの実行ログ
-├── README.md                # このファイル
-├── requirements.txt         # Pythonの依存パッケージリスト
+├── config.py                  # データベース接続情報などの設定ファイル
+├── create_table.sql           # データベースのテーブル定義
+├── download_log.csv           # データダウンロードの実行ログ
+├── README.md                  # このファイル
+├── requirements.txt           # Pythonの依存パッケージリスト
 ├── data/
-│   └── downloads/           # ダウンロードしたPCFのzipファイルを格納するディレクトリ
+│   └── downloads/             # ダウンロードしたPCFのzipファイルを格納するディレクトリ
 └── scripts/
-    ├── download_pcfs.bat      # データダウンロードスクリプトを実行するバッファイル
-    ├── download_pcfs.py       # JPXサイトからPCFデータをダウンロードするスクリプト
-    ├── import_daily_pcf.py  # 日付を指定してPCFデータを解析し、DBに登録するスクリプト
-    ├── pcf_parser.py          # 個別のPCFデータ（CSV）の解析処理を行うモジュール
-    └── database_handler.py    # データベースへの接続とデータ登録を行うモジュール
+    ├── download_pcfs.bat        # データダウンロードスクリプトを実行するバッチファイル
+    ├── download_pcfs.py         # JPXサイトからPCFデータをダウンロードするスクリプト
+    ├── import_daily_pcf.py    # 日付を指定してPCFデータを解析し、DBに登録するスクリプト
+    ├── batch_import.py          # 指定した期間のPCFデータを一括でインポートするスクリプト
+    ├── pcf_parser.py            # 個別のPCFデータ（CSV）の解析処理を行うモジュール
+    ├── database_handler.py      # データベースへの接続とデータ登録を行うモジュール
+    └── analyze_csv_structure.py # [開発用] CSVの構造を分析するスクリプト
 ```
 
 ## 実行手順
@@ -42,7 +44,7 @@ JPX（日本取引所グループ）のウェブサイトからETFのPCF（ポ�
 download_pcfs.bat
 ```
 
-### 3. データの解析とデータベースへの登録
+### 3. データの解析とデータベースへの登録 (日次)
 
 `scripts/import_daily_pcf.py` を実行することで、ダウンロード済みのPCFデータが解析され、データベースに登録されます。
 `--date`引数で処理したい日付を `YYYY-MM-DD` 形式で指定できます。引数を省略した場合は、実行した当日の日付が自動的に使用されます。
@@ -55,6 +57,15 @@ python scripts/import_daily_pcf.py --date 2023-01-01
 **例2：当日のデータで実行する場合**
 ```shell
 python scripts/import_daily_pcf.py
+```
+
+### 4. データの解析とデータベースへの登録 (一括)
+
+過去のデータをまとめてインポートしたい場合は `scripts/batch_import.py` を使用します。
+スクリプト内の `start_date` と `end_date` を編集することで、処理対象の期間を指定できます。
+
+```shell
+python scripts/batch_import.py
 ```
 
 ---

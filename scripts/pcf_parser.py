@@ -2,6 +2,7 @@ import pandas as pd
 import logging
 import io
 import re
+import numpy as np
 
 # --- 定義されたカラムリスト ---
 # 元のCSVファイルに存在する可能性のあるカラム名のリスト
@@ -111,23 +112,53 @@ def parse_csv_content(csv_content: str, fund_date):
 
         if 'currency' in df_holdings.columns:
             df_holdings = df_holdings.dropna(subset=['currency'])
+        
+        # 'shares' と 'shares_amount' を 'shares_amount' に統一
+        if 'shares' in df_holdings.columns:
+            if 'shares_amount' not in df_holdings.columns:
+                df_holdings.rename(columns={'shares': 'shares_amount'}, inplace=True)
+            else:
+                df_holdings['shares_amount'].fillna(df_holdings['shares'], inplace=True)
 
-        # market_valueの計算
-        shares_col = 'shares' if 'shares' in df_holdings.columns else 'shares_amount'
-        if 'market_value' in df_holdings.columns and shares_col in df_holdings.columns and 'stock_price' in df_holdings.columns:
-            num_cols_mv = [shares_col, 'stock_price', 'market_value']
-            for col in num_cols_mv:
-                df_holdings[col] = pd.to_numeric(df_holdings[col], errors='coerce')
-            
-            mask = df_holdings['market_value'].isnull()
-            df_holdings.loc[mask, 'market_value'] = df_holdings.loc[mask, shares_col] * df_holdings.loc[mask, 'stock_price']
+        # --- 補完対象カラムの存在を保証し、型を変換 ---
+        cols_to_process = ['shares_amount', 'stock_price', 'market_value']
+        for col in cols_to_process:
+            if col not in df_holdings.columns:
+                df_holdings[col] = np.nan  # 存在しない場合はNaN列を作成
+            df_holdings[col] = pd.to_numeric(df_holdings[col], errors='coerce')
+        
+        # --- 欠損値の相互補完ロジック ---
+        # 1. market_valueを補完
+        df_holdings['market_value'] = np.where(
+            df_holdings['market_value'].isnull(), # もし market_value が null なら
+            df_holdings['shares_amount'] * df_holdings['stock_price'], # 計算結果を使い
+            df_holdings['market_value'] # そうでなければ元の値を使う
+        )
 
-        # データ型変換
-        num_cols = ['shares', 'shares_amount', 'stock_price', 'market_value', 'fx_rate', 'future_multiplier']
-        for col in num_cols:
+        # 2. shares_amountを補完
+        df_holdings['shares_amount'] = np.where(
+            df_holdings['shares_amount'].isnull() & (df_holdings['stock_price'] != 0), # もし shares_amount が null かつ ゼロ除算の恐れがないなら
+            df_holdings['market_value'] / df_holdings['stock_price'], # 計算結果を使い
+            df_holdings['shares_amount'] # そうでなければ元の値を使う
+        )
+
+        # 3. stock_priceを補完
+        df_holdings['stock_price'] = np.where(
+            df_holdings['stock_price'].isnull() & (df_holdings['shares_amount'] != 0), # もし stock_price が null かつ ゼロ除算の恐れがないなら
+            df_holdings['market_value'] / df_holdings['shares_amount'], # 計算結果を使い
+            df_holdings['stock_price'] # そうでなければ元の値を使う
+        )
+        
+        # 'shares'列は不要であれば削除
+        if 'shares' in df_holdings.columns:
+            df_holdings.drop(columns=['shares'], inplace=True)
+
+        # その他のデータ型変換
+        other_num_cols = ['fx_rate', 'future_multiplier']
+        for col in other_num_cols:
             if col in df_holdings.columns:
                 df_holdings[col] = pd.to_numeric(df_holdings[col], errors='coerce')
-        
+
         if 'fx_forward_delivery_date' in df_holdings.columns:
             df_holdings['fx_forward_delivery_date'] = pd.to_datetime(df_holdings['fx_forward_delivery_date'], errors='coerce').dt.date
 
